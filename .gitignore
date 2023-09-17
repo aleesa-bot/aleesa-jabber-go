@@ -1,0 +1,10 @@
+.idea/**
+.vscode/**
+.vstags
+*.bak
+*.tmp
+**/*.bak
+**/*.tmp
+data/config.json
+data/settings_db/**
+buny-jabber-bot
