@@ -120,7 +120,7 @@ func establishConnection() {
 
 	// Джойнимся к чятикам, но делаем это в фоне, чтобы не блочиться на ошибках, например, если бота забанили
 	for _, room := range config.Jabber.Channels {
-		go joinMuc(room)
+		go joinMuc(room.Name)
 	}
 
 	go RotateStatus("")
@@ -177,7 +177,8 @@ func joinMuc(room string) {
 		}
 	}
 
-	if _, err := talk.JoinMUCNoHistory(room, config.Jabber.Nick); err != nil {
+	// Пытаемся зайти в комнату
+	if _, err := talk.JoinMUCNoHistory(room, getBotNickFromRoomConfig(room)); err != nil {
 		log.Errorf("Unable to join to MUC: %s", room)
 
 		gTomb.Kill(err)
@@ -356,7 +357,7 @@ func probeMUCLiveness() { //nolint:gocognit
 						sleepTime := time.Duration(rand.Int63n(1000*config.Jabber.PingSplayDelay)) * time.Millisecond //nolint:gosec
 						time.Sleep(sleepTime)
 
-						if err := talk.PingS2S(talk.JID(), room+"/"+config.Jabber.Nick); err != nil {
+						if err := talk.PingS2S(talk.JID(), room+"/"+getBotNickFromRoomConfig(room)); err != nil {
 							gTomb.Kill(err)
 							continue
 						}
@@ -552,6 +553,17 @@ func getMucNames(room string) []string {
 	}
 
 	return names
+}
+
+// getBotNickFromRoomConfig достаёт (короткий) ник бота из настроек чата
+func getBotNickFromRoomConfig(room string) string {
+	for _, roomStruct := range config.Jabber.Channels {
+		if roomStruct.Name == room {
+			return roomStruct.Nick
+		}
+	}
+
+	return config.Jabber.Nick
 }
 
 /* vim: set ft=go noet ai ts=4 sw=4 sts=4: */

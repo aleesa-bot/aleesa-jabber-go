@@ -30,9 +30,13 @@ type myConfig struct {
 		User                         string   `json:"user,omitempty"`
 		Password                     string   `json:"password,omitempty"`
 		BotMasters                   []string `json:"bot_masters"`
-		Channels                     []string `json:"channels"`
-		StartupStatus                []string `json:"startup_status,omitempty"`
-		RuntimeStatus                struct {
+		Channels                     []struct {
+			Name     string `json:"name,omitempty"`
+			Nick     string `json:"nick,omitempty"`
+			Password string `json:"password,omitempty"`
+		} `json:"channels,omitempty"`
+		StartupStatus []string `json:"startup_status,omitempty"`
+		RuntimeStatus struct {
 			Text              []string `json:"text,omitempty"`
 			RotationTime      int64    `json:"rotation_time,omitempty"`
 			RotationSplayTime int64    `json:"rotation_splay_time,omitempty"`

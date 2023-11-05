@@ -33,10 +33,10 @@ func parseEvent(e interface{}) { //nolint:maintidx,gocognit,gocyclo
 			// Групповой чятик
 			case "groupchat":
 				log.Debugf("Message from public chat: %s", v.Text)
-				// dest := strings.SplitN(v.Remote, "/", 2)[0]
+				room := strings.SplitN(v.Remote, "/", 2)[0]
 				nick := strings.SplitN(v.Remote, "/", 2)[1]
 
-				if nick == config.Jabber.Nick {
+				if nick == getBotNickFromRoomConfig(room) {
 					log.Debug("Skipping message from myself")
 
 					return
@@ -354,7 +354,7 @@ func parseEvent(e interface{}) { //nolint:maintidx,gocognit,gocyclo
 					mucNickMatch := false
 
 					for _, room := range roomsConnected {
-						mucNick := fmt.Sprintf("%s/%s", room, config.Jabber.Nick)
+						mucNick := fmt.Sprintf("%s/%s", room, getBotNickFromRoomConfig(room))
 
 						if v.From == mucNick {
 							mucNickMatch = true
@@ -438,9 +438,12 @@ func parseEvent(e interface{}) { //nolint:maintidx,gocognit,gocyclo
 
 				if err := xml.Unmarshal(v.Query, &iqErrorCancelNotAcceptable); err == nil {
 					if v.To == talk.JID() {
-						nick := strings.SplitN(v.From, "/", 2)[1]
+						var (
+							room = strings.SplitN(v.From, "/", 2)[0]
+							nick = strings.SplitN(v.From, "/", 2)[1]
+						)
 
-						if slices.Contains(roomsConnected, iqErrorCancelNotAcceptable.By) && nick == config.Jabber.Nick {
+						if slices.Contains(roomsConnected, iqErrorCancelNotAcceptable.By) && nick == getBotNickFromRoomConfig(room) {
 							log.Errorf(
 								"Got Iq error message from: %s to: %s. Looks like i'm not in MUC anymore",
 								v.From, v.To,

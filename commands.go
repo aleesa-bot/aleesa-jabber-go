@@ -60,7 +60,7 @@ func cmd(v xmpp.Chat) error {
 		message.Misc.Fwdcnt = 0
 		message.Misc.Csign = config.CSign
 		message.Misc.Username = userNick
-		message.Misc.Botnick = config.Jabber.Nick
+		message.Misc.Botnick = getBotNickFromRoomConfig(message.Chatid)
 		message.Misc.Msgformat = 0
 
 		msgLen := len(v.Text)
@@ -323,7 +323,9 @@ func cmd(v xmpp.Chat) error {
 		}
 
 		// Предполагается что в канале бот должен отвечать, только если к нему обратились, либо это была команда
-		if regexp.MustCompile(config.Jabber.Nick).Match([]byte(message.Message)) {
+		botNick := getBotNickFromRoomConfig(message.Chatid)
+
+		if regexp.MustCompile(regexp.QuoteMeta(botNick)).Match([]byte(message.Message)) {
 			message.Misc.Answer = 1
 		}
 
