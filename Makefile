@@ -1,10 +1,14 @@
 #!/usr/bin/env gmake -f
 
 BUILDOPTS=-ldflags="-s -w" -a -gcflags=all=-l -trimpath
-FILELIST=collection.go types.go globals.go lib.go event_parser.go commands.go redis.go settings-db-util.go main.go
+FILELIST=collection.go commands.go event_parser.go globals.go lib.go main.go read_config.go redis.go types.go \
+  settings-db-util.go
+
 BINARY=aleesa-jabber-go
 
+
 all: clean build
+
 
 build:
 ifeq ($(OS),Windows_NT)
@@ -22,8 +26,10 @@ else
 	CGO_ENABLED=0 go build ${BUILDOPTS} -o ${BINARY} ${FILELIST}
 endif
 
+
 clean:
 	go clean
+
 
 upgrade:
 ifeq ($(OS),Windows_NT)
