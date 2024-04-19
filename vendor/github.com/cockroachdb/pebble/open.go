@@ -89,7 +89,7 @@ func Open(dirname string, opts *Options) (db *DB, _ error) {
 	// Open the database and WAL directories first.
 	walDirname, dataDir, walDir, err := prepareAndOpenDirs(dirname, opts)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "error opening database at %q", dirname)
 	}
 	defer func() {
 		if db == nil {
@@ -260,7 +260,7 @@ func Open(dirname string, opts *Options) (db *DB, _ error) {
 		}
 
 		// Create the DB.
-		if err := d.mu.versions.create(jobID, dirname, opts, manifestMarker, setCurrent, &d.mu.Mutex); err != nil {
+		if err := d.mu.versions.create(jobID, dirname, opts, manifestMarker, setCurrent, d.FormatMajorVersion, &d.mu.Mutex); err != nil {
 			return nil, err
 		}
 	} else {
@@ -268,7 +268,7 @@ func Open(dirname string, opts *Options) (db *DB, _ error) {
 			return nil, errors.Wrapf(ErrDBAlreadyExists, "dirname=%q", dirname)
 		}
 		// Load the version set.
-		if err := d.mu.versions.load(dirname, opts, manifestFileNum.FileNum(), manifestMarker, setCurrent, &d.mu.Mutex); err != nil {
+		if err := d.mu.versions.load(dirname, opts, manifestFileNum.FileNum(), manifestMarker, setCurrent, d.FormatMajorVersion, &d.mu.Mutex); err != nil {
 			return nil, err
 		}
 		if opts.ErrorIfNotPristine {
@@ -378,6 +378,15 @@ func Open(dirname string, opts *Options) (db *DB, _ error) {
 					return nil, err
 				}
 			}
+		}
+	}
+
+	// Ratchet d.mu.versions.nextFileNum ahead of all known objects in the
+	// objProvider. This avoids FileNum collisions with obsolete sstables.
+	objects := d.objProvider.List()
+	for _, obj := range objects {
+		if d.mu.versions.nextFileNum <= obj.DiskFileNum.FileNum() {
+			d.mu.versions.nextFileNum = obj.DiskFileNum.FileNum() + 1
 		}
 	}
 
@@ -700,6 +709,11 @@ func (d *DB) replayWAL(
 		batchesReplayed int64 // number of batches replayed
 	)
 
+	// TODO(jackson): This function is interspersed with panics, in addition to
+	// corruption error propagation. Audit them to ensure we're truly only
+	// panicking where the error points to Pebble bug and not user or
+	// hardware-induced corruption.
+
 	if d.opts.ReadOnly {
 		// In read-only mode, we replay directly into the mutable memtable which will
 		// never be flushed.
@@ -754,6 +768,11 @@ func (d *DB) replayWAL(
 		ve.NewFiles = append(ve.NewFiles, newVE.NewFiles...)
 		return nil
 	}
+	defer func() {
+		if err != nil {
+			err = errors.WithDetailf(err, "replaying log %s, offset %d", logNum, offset)
+		}
+	}()
 
 	for {
 		offset = rr.Offset()
@@ -786,7 +805,8 @@ func (d *DB) replayWAL(
 
 		// Specify Batch.db so that Batch.SetRepr will compute Batch.memTableSize
 		// which is used below.
-		b = Batch{db: d}
+		b = Batch{}
+		b.db = d
 		b.SetRepr(buf.Bytes())
 		seqNum := b.SeqNum()
 		maxSeqNum = seqNum + uint64(b.Count())
@@ -794,7 +814,9 @@ func (d *DB) replayWAL(
 		batchesReplayed++
 		{
 			br := b.Reader()
-			if kind, encodedFileNum, _, _ := br.Next(); kind == InternalKeyKindIngestSST {
+			if kind, encodedFileNum, _, ok, err := br.Next(); err != nil {
+				return nil, 0, err
+			} else if ok && kind == InternalKeyKindIngestSST {
 				fileNums := make([]base.DiskFileNum, 0, b.Count())
 				addFileNum := func(encodedFileNum []byte) {
 					fileNum, n := binary.Uvarint(encodedFileNum)
@@ -806,7 +828,10 @@ func (d *DB) replayWAL(
 				addFileNum(encodedFileNum)
 
 				for i := 1; i < int(b.Count()); i++ {
-					kind, encodedFileNum, _, ok := br.Next()
+					kind, encodedFileNum, _, ok, err := br.Next()
+					if err != nil {
+						return nil, 0, err
+					}
 					if kind != InternalKeyKindIngestSST {
 						panic("pebble: invalid batch key kind.")
 					}
@@ -816,7 +841,9 @@ func (d *DB) replayWAL(
 					addFileNum(encodedFileNum)
 				}
 
-				if _, _, _, ok := br.Next(); ok {
+				if _, _, _, ok, err := br.Next(); err != nil {
+					return nil, 0, err
+				} else if ok {
 					panic("pebble: invalid number of entries in batch.")
 				}
 
@@ -909,7 +936,10 @@ func (d *DB) replayWAL(
 			// Make a copy of the data slice since it is currently owned by buf and will
 			// be reused in the next iteration.
 			b.data = append([]byte(nil), b.data...)
-			b.flushable = newFlushableBatch(&b, d.opts.Comparer)
+			b.flushable, err = newFlushableBatch(&b, d.opts.Comparer)
+			if err != nil {
+				return nil, 0, err
+			}
 			entry := d.newFlushableEntry(b.flushable, logNum, b.SeqNum())
 			// Disable memory accounting by adding a reader ref that will never be
 			// removed.
@@ -1105,6 +1135,12 @@ var ErrDBAlreadyExists = errors.New("pebble: database already exists")
 //
 // Note that errors can be wrapped with more details; use errors.Is().
 var ErrDBNotPristine = errors.New("pebble: database already exists and is not pristine")
+
+// IsCorruptionError returns true if the given error indicates database
+// corruption.
+func IsCorruptionError(err error) bool {
+	return errors.Is(err, base.ErrCorruption)
+}
 
 func checkConsistency(v *manifest.Version, dirname string, objProvider objstorage.Provider) error {
 	var buf bytes.Buffer

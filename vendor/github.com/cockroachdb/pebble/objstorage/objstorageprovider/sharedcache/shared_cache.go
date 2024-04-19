@@ -21,6 +21,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// Exported to enable exporting from package pebble to enable
+// exporting metrics with below buckets in CRDB.
+var (
+	IOBuckets           = prometheus.ExponentialBucketsRange(float64(time.Millisecond*1), float64(10*time.Second), 50)
+	ChannelWriteBuckets = prometheus.ExponentialBucketsRange(float64(time.Microsecond*1), float64(10*time.Second), 50)
+)
+
 // Cache is a persistent cache backed by a local filesystem. It is intended
 // to cache data that is in slower shared storage (e.g. S3), hence the
 // package name 'sharedcache'.
@@ -123,9 +130,10 @@ func Open(
 	sizeBytes int64,
 	numShards int,
 ) (*Cache, error) {
-	min := shardingBlockSize * int64(numShards)
-	if sizeBytes < min {
-		return nil, errors.Errorf("cache size %d lower than min %d", sizeBytes, min)
+	if minSize := shardingBlockSize * int64(numShards); sizeBytes < minSize {
+		// Up the size so that we have one block per shard. In practice, this should
+		// only happen in tests.
+		sizeBytes = minSize
 	}
 
 	c := &Cache{
@@ -143,15 +151,13 @@ func Open(
 
 	c.writeWorkers.Start(c, numShards*writeWorkersPerShard)
 
-	buckets := prometheus.ExponentialBucketsRange(float64(time.Millisecond*1), float64(10*time.Second), 50)
-	c.metrics.getLatency = prometheus.NewHistogram(prometheus.HistogramOpts{Buckets: buckets})
-	c.metrics.diskReadLatency = prometheus.NewHistogram(prometheus.HistogramOpts{Buckets: buckets})
-	c.metrics.putLatency = prometheus.NewHistogram(prometheus.HistogramOpts{Buckets: buckets})
-	c.metrics.diskWriteLatency = prometheus.NewHistogram(prometheus.HistogramOpts{Buckets: buckets})
+	c.metrics.getLatency = prometheus.NewHistogram(prometheus.HistogramOpts{Buckets: IOBuckets})
+	c.metrics.diskReadLatency = prometheus.NewHistogram(prometheus.HistogramOpts{Buckets: IOBuckets})
+	c.metrics.putLatency = prometheus.NewHistogram(prometheus.HistogramOpts{Buckets: IOBuckets})
+	c.metrics.diskWriteLatency = prometheus.NewHistogram(prometheus.HistogramOpts{Buckets: IOBuckets})
 
 	// Measures a channel write, so lower min.
-	buckets = prometheus.ExponentialBucketsRange(float64(time.Microsecond*1), float64(10*time.Second), 50)
-	c.metrics.queuePutLatency = prometheus.NewHistogram(prometheus.HistogramOpts{Buckets: buckets})
+	c.metrics.queuePutLatency = prometheus.NewHistogram(prometheus.HistogramOpts{Buckets: ChannelWriteBuckets})
 
 	return c, nil
 }

@@ -49,6 +49,9 @@ type TableStats struct {
 	// The number of point and range deletion entries in the table.
 	NumDeletions uint64
 	// NumRangeKeySets is the total number of range key sets in the table.
+	//
+	// NB: If there's a chance that the sstable contains any range key sets,
+	// then NumRangeKeySets must be > 0.
 	NumRangeKeySets uint64
 	// Estimate of the total disk space that may be dropped by this table's
 	// point deletions by compacting them.
@@ -169,22 +172,13 @@ type FileMetadata struct {
 	// FileNum is the file number.
 	//
 	// INVARIANT: when !FileMetadata.Virtual, FileNum == FileBacking.DiskFileNum.
-	//
-	// TODO(bananabrick): Consider creating separate types for
-	// FileMetadata.FileNum and FileBacking.FileNum. FileNum is used both as
-	// an indentifier for the FileMetadata in Pebble, and also as a handle to
-	// perform reads and writes. We should ensure through types that
-	// FileMetadata.FileNum isn't used to perform reads, and that
-	// FileBacking.FileNum isn't used as an identifier for the FileMetadata.
 	FileNum base.FileNum
 	// Size is the size of the file, in bytes. Size is an approximate value for
 	// virtual sstables.
 	//
-	// INVARIANT: when !FileMetadata.Virtual, Size == FileBacking.Size.
-	//
-	// TODO(bananabrick): Size is currently used in metrics, and for many key
-	// Pebble level heuristics. Make sure that the heuristics will still work
-	// appropriately with an approximate value of size.
+	// INVARIANTS:
+	// - When !FileMetadata.Virtual, Size == FileBacking.Size.
+	// - Size should be non-zero. Size 0 virtual sstables must not be created.
 	Size uint64
 	// File creation time in seconds since the epoch (1970-01-01 00:00:00
 	// UTC). For ingested sstables, this corresponds to the time the file was
@@ -309,6 +303,7 @@ type PhysicalFileMeta struct {
 //     The underlying file's size is stored in FileBacking.Size, though it could
 //     also be estimated or could correspond to just the referenced portion of
 //     a file (eg. if the file originated on another node).
+//   - Size must be > 0.
 //   - SmallestSeqNum and LargestSeqNum are loose bounds for virtual sstables.
 //     This means that all keys in the virtual sstable must have seqnums within
 //     [SmallestSeqNum, LargestSeqNum], however there's no guarantee that there's
@@ -1209,12 +1204,7 @@ func (v *Version) Unref() {
 		l := v.list
 		l.mu.Lock()
 		l.Remove(v)
-		obsolete := v.unrefFiles()
-		fileBacking := make([]*FileBacking, len(obsolete))
-		for i, f := range obsolete {
-			fileBacking[i] = f.FileBacking
-		}
-		v.Deleted(fileBacking)
+		v.Deleted(v.unrefFiles())
 		l.mu.Unlock()
 	}
 }
@@ -1226,17 +1216,12 @@ func (v *Version) Unref() {
 func (v *Version) UnrefLocked() {
 	if v.refs.Add(-1) == 0 {
 		v.list.Remove(v)
-		obsolete := v.unrefFiles()
-		fileBacking := make([]*FileBacking, len(obsolete))
-		for i, f := range obsolete {
-			fileBacking[i] = f.FileBacking
-		}
-		v.Deleted(fileBacking)
+		v.Deleted(v.unrefFiles())
 	}
 }
 
-func (v *Version) unrefFiles() []*FileMetadata {
-	var obsolete []*FileMetadata
+func (v *Version) unrefFiles() []*FileBacking {
+	var obsolete []*FileBacking
 	for _, lm := range v.Levels {
 		obsolete = append(obsolete, lm.release()...)
 	}
@@ -1368,16 +1353,20 @@ func (v *Version) Overlaps(
 // CheckOrdering checks that the files are consistent with respect to
 // increasing file numbers (for level 0 files) and increasing and non-
 // overlapping internal key ranges (for level non-0 files).
-func (v *Version) CheckOrdering(cmp Compare, format base.FormatKey) error {
+func (v *Version) CheckOrdering(
+	cmp Compare, format base.FormatKey, order OrderingInvariants,
+) error {
 	for sublevel := len(v.L0SublevelFiles) - 1; sublevel >= 0; sublevel-- {
 		sublevelIter := v.L0SublevelFiles[sublevel].Iter()
-		if err := CheckOrdering(cmp, format, L0Sublevel(sublevel), sublevelIter); err != nil {
+		// Sublevels have NEVER allowed split user keys, so we can pass
+		// ProhibitSplitUserKeys.
+		if err := CheckOrdering(cmp, format, L0Sublevel(sublevel), sublevelIter, ProhibitSplitUserKeys); err != nil {
 			return base.CorruptionErrorf("%s\n%s", err, v.DebugString(format))
 		}
 	}
 
 	for level, lm := range v.Levels {
-		if err := CheckOrdering(cmp, format, Level(level), lm.Iter()); err != nil {
+		if err := CheckOrdering(cmp, format, Level(level), lm.Iter(), order); err != nil {
 			return base.CorruptionErrorf("%s\n%s", err, v.DebugString(format))
 		}
 	}
@@ -1446,10 +1435,34 @@ func (l *VersionList) Remove(v *Version) {
 	v.list = nil // avoid memory leaks
 }
 
+// OrderingInvariants dictates the file ordering invariants active.
+type OrderingInvariants int8
+
+const (
+	// ProhibitSplitUserKeys indicates that adjacent files within a level cannot
+	// contain the same user key.
+	ProhibitSplitUserKeys OrderingInvariants = iota
+	// AllowSplitUserKeys indicates that adjacent files within a level may
+	// contain the same user key. This is only allowed by historical format
+	// major versions.
+	//
+	// TODO(jackson): Remove.
+	AllowSplitUserKeys
+)
+
 // CheckOrdering checks that the files are consistent with respect to
 // seqnums (for level 0 files -- see detailed comment below) and increasing and non-
 // overlapping internal key ranges (for non-level 0 files).
-func CheckOrdering(cmp Compare, format base.FormatKey, level Level, files LevelIterator) error {
+//
+// The ordering field may be passed AllowSplitUserKeys to allow adjacent files that are both
+// inclusive of the same user key. Pebble no longer creates version edits
+// installing such files, and Pebble databases with sufficiently high format
+// major version should no longer have any such files within their LSM.
+// TODO(jackson): Remove AllowSplitUserKeys when we remove support for the
+// earlier format major versions.
+func CheckOrdering(
+	cmp Compare, format base.FormatKey, level Level, files LevelIterator, ordering OrderingInvariants,
+) error {
 	// The invariants to check for L0 sublevels are the same as the ones to
 	// check for all other levels. However, if L0 is not organized into
 	// sublevels, or if all L0 files are being passed in, we do the legacy L0
@@ -1527,11 +1540,29 @@ func CheckOrdering(cmp Compare, format base.FormatKey, level Level, files LevelI
 						prev.Smallest.Pretty(format), prev.Largest.Pretty(format),
 						f.Smallest.Pretty(format), f.Largest.Pretty(format))
 				}
-				if base.InternalCompare(cmp, prev.Largest, f.Smallest) >= 0 {
-					return base.CorruptionErrorf("%s files %s and %s have overlapping ranges: [%s-%s] vs [%s-%s]",
-						errors.Safe(level), errors.Safe(prev.FileNum), errors.Safe(f.FileNum),
-						prev.Smallest.Pretty(format), prev.Largest.Pretty(format),
-						f.Smallest.Pretty(format), f.Largest.Pretty(format))
+
+				// What's considered "overlapping" is dependent on the format
+				// major version. If ordering=ProhibitSplitUserKeys, then both
+				// files cannot contain keys with the same user keys. If the
+				// bounds have the same user key, the previous file's boundary
+				// must have a Trailer indicating that it's exclusive.
+				switch ordering {
+				case AllowSplitUserKeys:
+					if base.InternalCompare(cmp, prev.Largest, f.Smallest) >= 0 {
+						return base.CorruptionErrorf("%s files %s and %s have overlapping ranges: [%s-%s] vs [%s-%s]",
+							errors.Safe(level), errors.Safe(prev.FileNum), errors.Safe(f.FileNum),
+							prev.Smallest.Pretty(format), prev.Largest.Pretty(format),
+							f.Smallest.Pretty(format), f.Largest.Pretty(format))
+					}
+				case ProhibitSplitUserKeys:
+					if v := cmp(prev.Largest.UserKey, f.Smallest.UserKey); v > 0 || (v == 0 && !prev.Largest.IsExclusiveSentinel()) {
+						return base.CorruptionErrorf("%s files %s and %s have overlapping ranges: [%s-%s] vs [%s-%s]",
+							errors.Safe(level), errors.Safe(prev.FileNum), errors.Safe(f.FileNum),
+							prev.Smallest.Pretty(format), prev.Largest.Pretty(format),
+							f.Smallest.Pretty(format), f.Largest.Pretty(format))
+					}
+				default:
+					panic("unreachable")
 				}
 			}
 		}

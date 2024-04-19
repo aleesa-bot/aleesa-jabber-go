@@ -194,6 +194,40 @@ func (c *tableCacheContainer) estimateSize(
 	return size, nil
 }
 
+// createCommonReader creates a Reader for this file. isForeign, if true for
+// virtual sstables, is passed into the vSSTable reader so its iterators can
+// collapse obsolete points accordingly.
+func createCommonReader(
+	v *tableCacheValue, file *fileMetadata, isForeign bool,
+) sstable.CommonReader {
+	// TODO(bananabrick): We suffer an allocation if file is a virtual sstable.
+	var cr sstable.CommonReader = v.reader
+	if file.Virtual {
+		virtualReader := sstable.MakeVirtualReader(
+			v.reader, file.VirtualMeta(), isForeign,
+		)
+		cr = &virtualReader
+	}
+	return cr
+}
+
+func (c *tableCacheContainer) withCommonReader(
+	meta *fileMetadata, fn func(sstable.CommonReader) error,
+) error {
+	s := c.tableCache.getShard(meta.FileBacking.DiskFileNum)
+	v := s.findNode(meta, &c.dbOpts)
+	defer s.unrefValue(v)
+	if v.err != nil {
+		return v.err
+	}
+	provider := c.dbOpts.objProvider
+	objMeta, err := provider.Lookup(fileTypeTable, meta.FileBacking.DiskFileNum)
+	if err != nil {
+		return err
+	}
+	return fn(createCommonReader(v, meta, provider.IsSharedForeign(objMeta)))
+}
+
 func (c *tableCacheContainer) withReader(meta physicalMeta, fn func(*sstable.Reader) error) error {
 	s := c.tableCache.getShard(meta.FileBacking.DiskFileNum)
 	v := s.findNode(meta.FileMetadata, &c.dbOpts)
@@ -214,7 +248,12 @@ func (c *tableCacheContainer) withVirtualReader(
 	if v.err != nil {
 		return v.err
 	}
-	return fn(sstable.MakeVirtualReader(v.reader, meta))
+	provider := c.dbOpts.objProvider
+	objMeta, err := provider.Lookup(fileTypeTable, meta.FileBacking.DiskFileNum)
+	if err != nil {
+		return err
+	}
+	return fn(sstable.MakeVirtualReader(v.reader, meta, provider.IsSharedForeign(objMeta)))
 }
 
 func (c *tableCacheContainer) iterCount() int64 {
@@ -432,25 +471,6 @@ func (c *tableCacheShard) newIters(
 		return nil, nil, err
 	}
 
-	type iterCreator interface {
-		NewRawRangeDelIter() (keyspan.FragmentIterator, error)
-		NewIterWithBlockPropertyFiltersAndContextEtc(ctx context.Context, lower, upper []byte, filterer *sstable.BlockPropertiesFilterer, hideObsoletePoints, useFilterBlock bool, stats *base.InternalIteratorStats, rp sstable.ReaderProvider) (sstable.Iterator, error)
-		NewCompactionIter(
-			bytesIterated *uint64,
-			rp sstable.ReaderProvider,
-			bufferPool *sstable.BufferPool,
-		) (sstable.Iterator, error)
-	}
-
-	// TODO(bananabrick): We suffer an allocation if file is a virtual sstable.
-	var ic iterCreator = v.reader
-	if file.Virtual {
-		virtualReader := sstable.MakeVirtualReader(
-			v.reader, file.VirtualMeta(),
-		)
-		ic = &virtualReader
-	}
-
 	provider := dbOpts.objProvider
 	// Check if this file is a foreign file.
 	objMeta, err := provider.Lookup(fileTypeTable, file.FileBacking.DiskFileNum)
@@ -458,9 +478,12 @@ func (c *tableCacheShard) newIters(
 		return nil, nil, err
 	}
 
+	// Note: This suffers an allocation for virtual sstables.
+	cr := createCommonReader(v, file, provider.IsSharedForeign(objMeta))
+
 	// NB: range-del iterator does not maintain a reference to the table, nor
 	// does it need to read from it after creation.
-	rangeDelIter, err := ic.NewRawRangeDelIter()
+	rangeDelIter, err := cr.NewRawRangeDelIter()
 	if err != nil {
 		c.unrefValue(v)
 		return nil, nil, err
@@ -504,9 +527,9 @@ func (c *tableCacheShard) newIters(
 		hideObsoletePoints = true
 	}
 	if internalOpts.bytesIterated != nil {
-		iter, err = ic.NewCompactionIter(internalOpts.bytesIterated, rp, internalOpts.bufferPool)
+		iter, err = cr.NewCompactionIter(internalOpts.bytesIterated, rp, internalOpts.bufferPool)
 	} else {
-		iter, err = ic.NewIterWithBlockPropertyFiltersAndContextEtc(
+		iter, err = cr.NewIterWithBlockPropertyFiltersAndContextEtc(
 			ctx, opts.GetLowerBound(), opts.GetUpperBound(), filterer, hideObsoletePoints, useFilter,
 			internalOpts.stats, rp)
 	}
@@ -567,10 +590,15 @@ func (c *tableCacheShard) newRangeKeyIter(
 
 	var iter keyspan.FragmentIterator
 	if file.Virtual {
-		virtualReader := sstable.MakeVirtualReader(
-			v.reader, file.VirtualMeta(),
-		)
-		iter, err = virtualReader.NewRawRangeKeyIter()
+		provider := dbOpts.objProvider
+		var objMeta objstorage.ObjectMetadata
+		objMeta, err = provider.Lookup(fileTypeTable, file.FileBacking.DiskFileNum)
+		if err == nil {
+			virtualReader := sstable.MakeVirtualReader(
+				v.reader, file.VirtualMeta(), provider.IsSharedForeign(objMeta),
+			)
+			iter, err = virtualReader.NewRawRangeKeyIter()
+		}
 	} else {
 		iter, err = v.reader.NewRawRangeKeyIter()
 	}
@@ -714,23 +742,30 @@ func (c *tableCacheShard) unrefValue(v *tableCacheValue) {
 // findNode returns the node for the table with the given file number, creating
 // that node if it didn't already exist. The caller is responsible for
 // decrementing the returned node's refCount.
-func (c *tableCacheShard) findNode(
-	meta *fileMetadata, dbOpts *tableCacheOpts,
-) (v *tableCacheValue) {
+func (c *tableCacheShard) findNode(meta *fileMetadata, dbOpts *tableCacheOpts) *tableCacheValue {
+	v := c.findNodeInternal(meta, dbOpts)
+
 	// Loading a file before its global sequence number is known (eg,
 	// during ingest before entering the commit pipeline) can pollute
 	// the cache with incorrect state. In invariant builds, verify
 	// that the global sequence number of the returned reader matches.
 	if invariants.Enabled {
-		defer func() {
-			if v.reader != nil && meta.LargestSeqNum == meta.SmallestSeqNum &&
-				v.reader.Properties.GlobalSeqNum != meta.SmallestSeqNum {
-				panic(errors.AssertionFailedf("file %s loaded from table cache with the wrong global sequence number %d",
-					meta, v.reader.Properties.GlobalSeqNum))
-			}
-		}()
+		if v.reader != nil && meta.LargestSeqNum == meta.SmallestSeqNum &&
+			v.reader.Properties.GlobalSeqNum != meta.SmallestSeqNum {
+			panic(errors.AssertionFailedf("file %s loaded from table cache with the wrong global sequence number %d",
+				meta, v.reader.Properties.GlobalSeqNum))
+		}
 	}
+	return v
+}
 
+func (c *tableCacheShard) findNodeInternal(
+	meta *fileMetadata, dbOpts *tableCacheOpts,
+) *tableCacheValue {
+	if refs := meta.Refs(); refs <= 0 {
+		panic(errors.AssertionFailedf("attempting to load file %s with refs=%d from table cache",
+			meta, refs))
+	}
 	// Fast-path for a hit in the cache.
 	c.mu.RLock()
 	key := tableCacheKey{dbOpts.cacheID, meta.FileBacking.DiskFileNum}
@@ -738,7 +773,7 @@ func (c *tableCacheShard) findNode(
 		// Fast-path hit.
 		//
 		// The caller is responsible for decrementing the refCount.
-		v = n.value
+		v := n.value
 		v.refCount.Add(1)
 		c.mu.RUnlock()
 		n.referenced.Store(true)
@@ -765,7 +800,7 @@ func (c *tableCacheShard) findNode(
 		// Slow-path hit of a hot or cold node.
 		//
 		// The caller is responsible for decrementing the refCount.
-		v = n.value
+		v := n.value
 		v.refCount.Add(1)
 		n.referenced.Store(true)
 		c.hits.Add(1)
@@ -789,7 +824,7 @@ func (c *tableCacheShard) findNode(
 
 	c.misses.Add(1)
 
-	v = &tableCacheValue{
+	v := &tableCacheValue{
 		loaded: make(chan struct{}),
 	}
 	v.refCount.Store(2)
