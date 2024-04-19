@@ -14,7 +14,7 @@ import (
 // StoreKV сохраняет в указанной бд ключ и значение.
 func StoreKV(db *pebble.DB, key string, value string) error {
 	var (
-		kArray = []byte(key) //nolint:revive
+		kArray = []byte(key)
 		vArray = []byte(value)
 	)
 
@@ -26,7 +26,7 @@ func StoreKV(db *pebble.DB, key string, value string) error {
 // FetchV достаёт значение по ключу.
 func FetchV(db *pebble.DB, key string) (string, error) {
 	var (
-		kArray      = []byte(key) //nolint:revive
+		kArray      = []byte(key)
 		vArray      []byte
 		valueString string
 	)

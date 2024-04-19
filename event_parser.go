@@ -54,7 +54,7 @@ func parseEvent(e interface{}) { //nolint:maintidx,gocognit,gocyclo
 					lastMucActivity.Set(muc, lastServerActivity)
 				}
 
-			// Приватный чятик
+			// Приватный чятик.
 			case "chat":
 				// Здесь у нас может быть 2 вида From:
 				//  slackware-current@conference.jabber.ru/eleksir - это если сообщение из публичного чятика
@@ -70,7 +70,7 @@ func parseEvent(e interface{}) { //nolint:maintidx,gocognit,gocyclo
 				lastActivity = lastServerActivity
 
 			// Внезапно, ошибки. По идее они должны ассоциироваться с отправляемыми сообщениями, но по ходу это
-			// не реализовано, поэтому мы получаем ошибки в форме отдельного чятика
+			// не реализовано, поэтому мы получаем ошибки в форме отдельного чятика.
 			case "error":
 				// Это ошибка со стороны сервера, видимо, в ответ на наши действия и поскольку такие вещи происходят
 				// асинхронно, связать их с конкретными нашими действиями довольно сложно.
@@ -80,7 +80,7 @@ func parseEvent(e interface{}) { //nolint:maintidx,gocognit,gocyclo
 
 	// IQ-сообщение - пинг, понг, что-то ещё...
 	case xmpp.IQ:
-		// По правилам IQ обязательно должна содержать ID, причём не пустой
+		// По правилам IQ обязательно должна содержать ID, причём не пустой.
 		if v.ID == "" {
 			log.Info("Got an IQ stanza with empty id, discarding")
 
@@ -363,9 +363,9 @@ func parseEvent(e interface{}) { //nolint:maintidx,gocognit,gocyclo
 						}
 					}
 
+					// Поскольку никакой логики у нас на этот счёт не предусмотрено, то просто пропускаем ответ.
 					if mucNickMatch {
 						log.Debugf("Got 2-nd stage MUC pong answer (xep-0410) from %s to %s", v.From, v.To)
-						// Поскольку никакой логики у нас на этот счёт не предусмотрено, то просто пропускаем ответ
 					} else {
 						log.Infof("Got unknown pong from %s to %s", v.From, v.To)
 						log.Debug(spew.Sdump(e))
@@ -376,7 +376,7 @@ func parseEvent(e interface{}) { //nolint:maintidx,gocognit,gocyclo
 				log.Debug(spew.Sdump(e))
 			}
 
-		// Этот бот не управляется со стороны сервера, поэтому все попытки порулить игнорируем
+		// Этот бот не управляется со стороны сервера, поэтому все попытки порулить игнорируем.
 		case xmpp.IQTypeSet:
 			if muc, _ := strings.CutSuffix(v.To, "/"); muc != "" {
 				if slices.Contains(roomsConnected, muc) {
@@ -404,7 +404,7 @@ func parseEvent(e interface{}) { //nolint:maintidx,gocognit,gocyclo
 
 			log.Debug(spew.Sdump(e))
 
-		// Нам прилетело сообщение об ошибке
+		// Нам прилетело сообщение об ошибке.
 		case xmpp.IQTypeError:
 			// Если сервер не хочет пинговаться и отвечает ошибкой на пинг, то наверно он не умеет в пинги,
 			// хотя если мы его пингуем, значит он анонсировал такой capability. Вот, засранец!
@@ -432,7 +432,7 @@ func parseEvent(e interface{}) { //nolint:maintidx,gocognit,gocyclo
 				parseError = false
 			}
 
-			// Это у нас пинг xep-0410 и мы не в комнате, предполагается, что надо бы заджойниться
+			// Это у нас пинг xep-0410 и мы не в комнате, предполагается, что надо бы заджойниться.
 			if parseError {
 				var iqErrorCancelNotAcceptable jabberIqErrorCancelNotAcceptable
 
@@ -484,7 +484,7 @@ func parseEvent(e interface{}) { //nolint:maintidx,gocognit,gocyclo
 				log.Error("Unhandled IQ Error message")
 				log.Error(spew.Sdump(e))
 			}
-		// Нам прилетело что-то неизвестное из семейства IQ stanza
+		// Нам прилетело что-то неизвестное из семейства IQ stanza.
 		default:
 			log.Info("Got an unknown IQ request. Dunno how deal with it, discarding")
 			log.Info(spew.Sdump(e))
@@ -505,7 +505,7 @@ func parseEvent(e interface{}) { //nolint:maintidx,gocognit,gocyclo
 			// клиента забанят из-за спама "вошёл-вышел".
 			// Однако, это не значит, что такую ситуацию мы не должны корректным образом обрабатывать.
 			if v.Type == "unavailable" {
-				// Считаем, что мы больше не в комнате, поэтому не знаем, кто там есть
+				// Считаем, что мы больше не в комнате, поэтому не знаем, кто там есть.
 				roomPresences.Delete(v.From)
 
 				log.Error("Presence notification - looks like another instance of client leaves room")
@@ -548,6 +548,7 @@ func parseEvent(e interface{}) { //nolint:maintidx,gocognit,gocyclo
 			case "none":
 				if presenceJSONInterface, present := roomPresences.Get(room); present {
 					presenceJSONStrings := interfaceToStringSlice(presenceJSONInterface)
+
 					var newPresenceJSONStrings []string
 
 					for _, presenceJSONstring := range presenceJSONStrings {
@@ -565,9 +566,11 @@ func parseEvent(e interface{}) { //nolint:maintidx,gocognit,gocyclo
 				}
 			// Участник пришёл
 			default:
-				var presenceJSONStrings []string
-				var newPresenceJSONStrings []string
-				var presenceJSONBytes []byte
+				var (
+					presenceJSONStrings    []string
+					newPresenceJSONStrings []string
+					presenceJSONBytes      []byte
+				)
 
 				if presenceJSONInterface, present := roomPresences.Get(room); present {
 					presenceJSONStrings = interfaceToStringSlice(presenceJSONInterface)

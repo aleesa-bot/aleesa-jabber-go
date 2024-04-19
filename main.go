@@ -26,7 +26,7 @@ func init() {
 		TimestampFormat:        "2006-01-02 15:04:05",
 	})
 
-	// Добавим динамически формируемый путь до конфига в список возможных положений конфига в системе
+	// Добавим динамически формируемый путь до конфига в список возможных положений конфига в системе.
 	executablePath, err := os.Executable()
 
 	if err != nil {
@@ -84,14 +84,14 @@ func main() {
 		verboseClient = true
 	}
 
-	// github.com/mattn/go-xmpp пишет в stdio, нам этого не надо, ловим выхлоп его в logrus с уровнем trace
+	// github.com/mattn/go-xmpp пишет в stdio, нам этого не надо, ловим выхлоп его в logrus с уровнем trace.
 	xmpp.DebugWriter = log.WithFields(log.Fields{"logger": "stdlib"}).WriterLevel(log.TraceLevel)
 
-	// Хэндлер сигналов не надо трогать, он нужен для завершения программы целиком
+	// Хэндлер сигналов не надо трогать, он нужен для завершения программы целиком.
 	go sigHandler()
 	signal.Notify(sigChan, os.Interrupt)
 
-	// Иницализируем redis-клиента
+	// Иницализируем redis-клиента.
 	redisClient = redis.NewClient(&redis.Options{ //nolint:exhaustruct
 		Addr: fmt.Sprintf("%s:%d", config.Redis.Server, config.Redis.Port),
 	})
@@ -121,10 +121,10 @@ func main() {
 			DialTimeout:                  time.Duration(config.Jabber.ConnectionTimeout) * time.Second,
 		}
 
-		// Через tomb попробуем сделать выход горутинок управляемым
+		// Через tomb попробуем сделать выход горутинок управляемым.
 		gTomb = tomb.Tomb{}
 
-		// Устанавливаем соединение и гребём события, посылаемые сервером
+		// Устанавливаем соединение и гребём события, посылаемые сервером.
 		myLoop()
 
 		log.Error(gTomb.Wait())
@@ -132,6 +132,7 @@ func main() {
 		// Если у нас wire error, то вызов .Close() повлечёт за собой ошибку, но мы вынуждены звать .Close(), чтоб
 		// закрыть tls контекст и почистить всё что связанно с прерванным соединением.
 		log.Infoln("Closing connection to jabber server")
+
 		_ = talk.Close()
 
 		time.Sleep(time.Duration(config.Jabber.ReconnectDelay) * time.Second)
@@ -143,10 +144,11 @@ func myLoop() {
 		select {
 		case <-gTomb.Dying():
 			gTomb.Done()
+
 			return
 
 		default:
-			// Зададим начальное значение глобальным переменным
+			// Зададим начальное значение глобальным переменным.
 			serverPingTimestampRx = 0
 			serverPingTimestampTx = 0
 			roomsConnected = make([]string, 1)
@@ -160,65 +162,63 @@ func myLoop() {
 			serverPingTimestampRx = 0
 			roomPresences = NewCollection()
 
-			// Установим коннект
+			// Установим коннект.
 			establishConnection()
 
-			serverPingTimestampRx = time.Now().Unix() // Считаем, что если коннект запустился, то первый пинг успешен
+			serverPingTimestampRx = time.Now().Unix() // Считаем, что если коннект запустился, то первый пинг успешен.
 
-			// Тыкаем сервер палочкой, проверяем, что коннект жив и переустанавливаем его, если он не жив
+			// Тыкаем сервер палочкой, проверяем, что коннект жив и переустанавливаем его, если он не жив.
 			go probeServerLiveness()
 
-			// Тыкаем muc-и палочкой, проверяем, что они живы и пере-заходим в них, если пинги пропали
+			// Тыкаем muc-и палочкой, проверяем, что они живы и пере-заходим в них, если пинги пропали.
 			go probeMUCLiveness()
 
 			// Гребём сообщения...
 			for {
-				// Стриггерилось завершение работы приложения, или соединение не установлено (порвалось, например)
-				// грести не надо
+				// Стриггерилось завершение работы приложения, или соединение не установлено (порвалось, например).
+				// грести не надо.
 				if shutdown {
 					break
 				}
 
 				if !isConnected {
+					// Tight loop - это наверно не очень хорошо, думаю, ничего страшного не будет, если мы поспим 100мс.
+					time.Sleep(100 * time.Millisecond)
+
 					continue
 				}
 
+				// Вынимаем ивент из "провода".
 				chat, err := talk.Recv()
 
 				if err != nil {
 					log.Errorf("Unable to get events from server: %s", err)
 
+					// Попробуем скрасить печальные будни generic-ошибок...
 					switch {
-					// Стрим не читается, он закрылся с той стороны во время чтения
+					// Стрим не читается, он закрылся с той стороны во время чтения.
 					case errors.Is(err, io.EOF):
-						err := fmt.Errorf("tcp stream closed while reading, err=%w", err)
-						gTomb.Kill(err)
+						err = fmt.Errorf("tcp stream closed while reading, err=%w", err)
 
-						continue
-
-					// Пытаемся читать закрытый сокет
+					// Пытаемся читать закрытый сокет.
 					case errors.Is(err, net.ErrClosed):
-						err := fmt.Errorf("unable to read closed socket, err=%w", err)
-						gTomb.Kill(err)
+						err = fmt.Errorf("unable to read closed socket, err=%w", err)
 
-						continue
-
-					// Не смогли записать в сокет
+					// Не смогли записать в сокет.
 					case errors.Is(err, net.ErrWriteToConnected):
-						err := fmt.Errorf("unable to write to socket, err=%w", err)
-						gTomb.Kill(err)
+						err = fmt.Errorf("unable to write to socket, err=%w", err)
 
-						continue
-
-					// Не сетевая проблема
+					// Не сетевая проблема.
 					default:
 						// Это уже что-то странное.
-						// Вероятно, ошибка парсинга xml. Собственно, баг сервера, тут мы ничего поделать не можем
-						err := fmt.Errorf("error during parsing received message, err=%w", err)
-						gTomb.Kill(err)
-
-						continue
+						// Вероятно, ошибка парсинга xml. Собственно, баг сервера, тут мы ничего поделать не можем.
+						err = fmt.Errorf("error during parsing received message, err=%w", err)
 					}
+
+					gTomb.Kill(err)
+
+					// Не забываем выходить на ошибке :(
+					return
 				}
 
 				parseEvent(chat)

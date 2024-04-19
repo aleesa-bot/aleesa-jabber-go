@@ -189,15 +189,15 @@ func readConfig() error { //nolint:gocognit,gocyclo
 
 		for n, channel := range sampleConfig.Jabber.Channels {
 			if channel.Name == "" {
-				return errors.New("no \"name\" entry in jabber channel config")
+				return fmt.Errorf("no \"name\" entry in jabber channel config")
 			}
 
 			if channel.Nick == "" {
 				sampleConfig.Jabber.Channels[n].Nick = sampleConfig.Jabber.Nick
 			}
 
-			// channel.Password может быть пустым, тогда пароля нет
-		}
+			// channel.Password может быть пустым, тогда пароля нет.
+		} //nolint:wsl
 
 		// Если список фраз с которыми стартует бот пустой, вносим в него 1 запись с пустой строкой
 		if len(sampleConfig.Jabber.StartupStatus) == 0 {
@@ -235,13 +235,13 @@ func readConfig() error { //nolint:gocognit,gocyclo
 		config = sampleConfig
 		configLoaded = true
 
-		log.Infof("Using %s as config file", location) //nolint:wsl
+		log.Infof("Using %s as config file", location)
 
 		break
 	}
 
 	if !configLoaded {
-		return errors.New("config was not loaded!") //nolint:goerr113,revive,stylecheck
+		return fmt.Errorf("config was not loaded!") //nolint:goerr113,revive,stylecheck
 	}
 
 	return err //nolint:wrapcheck
