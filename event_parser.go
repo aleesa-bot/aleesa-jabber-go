@@ -516,7 +516,7 @@ func parseEvent(e interface{}) { //nolint:maintidx,gocognit,gocyclo
 			} else {
 				log.Errorf("Presence notification, Type: %s, From: %s, Show: %s, Status: %s",
 					v.Type, v.From, v.Show, v.Status)
-				log.Errorf(spew.Sdump(v))
+				log.Error(spew.Sdump(v))
 			}
 		} else {
 			log.Infof(

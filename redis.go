@@ -9,17 +9,19 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func redisLoop(redisMsgChan <-chan *redis.Message) {
+func redisLoop(redisMsgChan <-chan *redis.Message) error {
 	// Обработчик событий от редиски
 	for msg := range redisMsgChan {
 		if shutdown {
-			return
+			return nil
 		}
 
 		if err := redisMsgParser(msg.Payload); err != nil {
 			log.Warn(err)
 		}
 	}
+
+	return nil
 }
 
 // redisMsgParser парсит json-чики прилетевшие из REDIS-ки.

@@ -7,7 +7,7 @@ import (
 	"github.com/cockroachdb/pebble"
 	"github.com/eleksir/go-xmpp"
 	"github.com/go-redis/redis/v8"
-	"gopkg.in/tomb.v1"
+	"gopkg.in/tomb.v2"
 )
 
 // Config - это у нас глобальная штука :) .
@@ -33,7 +33,7 @@ var connecting = false
 var isConnected = false
 
 // Канал, в который приходят уведомления для хэндлера сигналов от траппера сигналов.
-var sigChan = make(chan os.Signal, 1)
+var sigChan chan os.Signal
 
 // Основной инстанс xmpp-клиента.
 var talk *xmpp.Client
