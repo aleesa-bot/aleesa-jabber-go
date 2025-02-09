@@ -29,7 +29,7 @@ func cmd(v xmpp.Chat) error {
 		"пословица", "пословиться", "fortune", "фортунка", "f", "ф", "anek", "анек", "анекдот", "buni", "cat",
 		"кис", "drink", "праздник", "fox", "лис", "frog", "лягушка", "horse", "лошадь", "лошадка", "monkeyuser",
 		"owl", "сова", "сыч", "rabbit", "bunny", "кролик", "snail", "улитка", "xkcd", "dig", "копать", "fish",
-		"fishing", "рыба", "рыбка", "рыбалка", "karma", "карма"}
+		"fishing", "рыба", "рыбка", "рыбалка", "karma", "карма", "w", "п", "weather", "погода", "погодка", "погадка"}
 
 	// Список отключаемых команд проверяется в case-е про groupchat, чуть ниже
 
@@ -105,7 +105,7 @@ func cmd(v xmpp.Chat) error {
 				answer += fmt.Sprintf("%ssome_brew                  - выдать соответствующий напиток, бармен может налить rum, ром, vodka, водку, tequila, текила\n", config.CSign)
 				answer += fmt.Sprintf("%sver | %sversion             - написать что-то про версию ПО\n", config.CSign, config.CSign)
 				answer += fmt.Sprintf("%sверсия                     - написать что-то про версию ПО\n", config.CSign)
-				answer += fmt.Sprintf("%sw город | %sп город         - погода в городе\n", config.CSign, config.CSign)
+				answer += fmt.Sprintf("%sw <город> | %sп <город>     - погода в городе\n", config.CSign, config.CSign)
 				answer += fmt.Sprintf("%sxkcd                       - комикс-стрип с xkcb.ru\n", config.CSign)
 
 				// Для овнера или админа надо показывать команду admin
