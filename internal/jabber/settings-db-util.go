@@ -1,4 +1,4 @@
-package main
+package jabber
 
 import (
 	"crypto/sha256"
@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"io/fs"
 
+	"aleesa-jabber-go/internal/log"
+
 	"github.com/cockroachdb/errors/oserror"
 	"github.com/cockroachdb/pebble"
-	log "github.com/sirupsen/logrus"
 )
 
 // StoreKV сохраняет в указанной бд ключ и значение.
@@ -58,7 +59,7 @@ func getSetting(chatID string, setting string) string {
 		// настройками порождается огромное количество файлов. Умолчальное ограничение на количество файлов - 500 штук,
 		// что нас не устраивает, поэтому немного снизим эту цифру до более приемлемых значений
 		options.L0CompactionFileThreshold = 8
-		settingsDB[database], err = pebble.Open(config.DataDir+"/"+database, &options)
+		settingsDB[database], err = pebble.Open(Config.DataDir+"/"+database, &options)
 
 		if err != nil {
 			log.Errorf("Unable to open settings db, %s: %s\n", database, err)
@@ -107,7 +108,7 @@ func saveSetting(chatID string, setting string, value string) error {
 		// что нас не устраивает, поэтому немного снизим эту цифру до более приемлемых значений
 		options.L0CompactionFileThreshold = 8
 
-		settingsDB[database], err = pebble.Open(config.DataDir+"/"+database, &options)
+		settingsDB[database], err = pebble.Open(Config.DataDir+"/"+database, &options)
 
 		if err != nil {
 			log.Errorf("Unable to open settings db, %s: %s\n", database, err)

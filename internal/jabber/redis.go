@@ -1,23 +1,25 @@
-package main
+package jabber
 
 import (
 	"encoding/json"
 	"fmt"
 
+	"aleesa-jabber-go/internal/log"
+
 	"github.com/eleksir/go-xmpp"
 	"github.com/go-redis/redis/v8"
-	log "github.com/sirupsen/logrus"
 )
 
-func redisLoop(redisMsgChan <-chan *redis.Message) error {
+// RedisLoop вычитывает сообщения из редиски.
+func RedisLoop(redisMsgChan <-chan *redis.Message) error {
 	// Обработчик событий от редиски
 	for msg := range redisMsgChan {
-		if shutdown {
+		if Shutdown {
 			return nil
 		}
 
 		if err := redisMsgParser(msg.Payload); err != nil {
-			log.Warn(err)
+			log.Warnf("%s", err)
 		}
 	}
 
@@ -28,7 +30,7 @@ func redisLoop(redisMsgChan <-chan *redis.Message) error {
 func redisMsgParser(msg string) error {
 	var err error
 
-	if shutdown {
+	if Shutdown {
 		// Если мы завершаем работу программы, то нам ничего обрабатывать не надо.
 		return err
 	}
@@ -90,7 +92,7 @@ func redisMsgParser(msg string) error {
 	// j.Misc.BotNick тоже можно не передавать, тогда будет записана пустая строка
 	// j.Misc.CSign если нам его не передали, возьмём значение из конфига
 	if exist := j.Misc.Csign; exist == "" {
-		j.Misc.Csign = config.CSign
+		j.Misc.Csign = Config.CSign
 	}
 
 	// j.Misc.FwdCnt если нам его не передали, то будет 0
@@ -107,7 +109,7 @@ func redisMsgParser(msg string) error {
 		switch j.Mode {
 		case "public":
 			// Отправляем сообщение в чятик, а не тому, кто прислал нам исходное сообщение
-			if _, err := talk.Send(
+			if _, err := Talk.Send(
 				xmpp.Chat{ //nolint:exhaustruct
 					Remote: j.Chatid,
 					Type:   "groupchat",
@@ -121,7 +123,7 @@ func redisMsgParser(msg string) error {
 
 		case "private":
 			// Отправляем сообщение тому, кто прислал сообщение
-			if _, err := talk.Send(
+			if _, err := Talk.Send(
 				xmpp.Chat{ //nolint:exhaustruct
 					Remote: j.From,
 					Type:   "chat",

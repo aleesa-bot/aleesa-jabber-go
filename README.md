@@ -17,7 +17,7 @@ pubsub.
 make
 ```
 
-в итоге получится бинарник **aleesa-jabber-go**. После создания data/config.json из data/config_sample.json, можно
+в итоге получится бинарник **aleesa-jabber-go**. После создания data/Config.json из data/config_sample.json, можно
 запускать приложение.
 
 Предполагается, что конфиг написан в формате [human json](https://hjson.github.io), который допускает коментарии и
@@ -28,12 +28,12 @@ make
 ~/.aleesa-jabber-go.json
 ~/aleesa-jabber-go.json
 /etc/aleesa-jabber-go.json
-data/config.json
+data/Config.json
 ```
 
 В каталоге **contrib** находится скрипт для _alpine linux_, системы инициализации _openrc_. Этот скрипт достаточно
 положить в **/etc/init.d/aleesa-jabber-go**. После чего скопировать бинарник в каталог **/var/lib/aleesa-jabber-go**, 
-положить конфиг в одну из дефолтных локаций (тестировалась /var/lib/aleesa-jabber-go/data/config.json) и после этого 
+положить конфиг в одну из дефолтных локаций (тестировалась /var/lib/aleesa-jabber-go/data/Config.json) и после этого 
 сервис запускается командой:
 
 ```bash

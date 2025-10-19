@@ -1,6 +1,6 @@
 module aleesa-jabber-go
 
-go 1.22
+go 1.25.1
 
 require (
 	github.com/cockroachdb/errors v1.11.3
@@ -9,7 +9,6 @@ require (
 	github.com/eleksir/go-xmpp v1.6.0
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/hjson/hjson-go v3.3.0+incompatible
-	github.com/sirupsen/logrus v1.9.3
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
 	gopkg.in/tomb.v2 v2.0.0-20161208151619-d5d1b5820637
 )

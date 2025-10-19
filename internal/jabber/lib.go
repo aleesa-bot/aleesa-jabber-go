@@ -1,138 +1,63 @@
-package main
+package jabber
 
 import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"os"
 	"reflect"
 	"strings"
-	"syscall"
 	"time"
 
+	"aleesa-jabber-go/internal/log"
+
 	"github.com/eleksir/go-xmpp"
-	log "github.com/sirupsen/logrus"
+
 	"golang.org/x/exp/slices"
 )
 
-// sigHandler Хэндлер сигналов закрывает все бд, все сетевые соединения и сваливает из приложения.
-func sigHandler() error {
-	log.Debug("Installing signal handler")
-
-	for s := range sigChan {
-		switch s {
-		case syscall.SIGINT:
-			log.Infoln("Got SIGINT, quitting")
-		case syscall.SIGTERM:
-			log.Infoln("Got SIGTERM, quitting")
-		case syscall.SIGQUIT:
-			log.Infoln("Got SIGQUIT, quitting")
-
-		// Заходим на новую итерацию, если у нас "неинтересный" сигнал.
-		default:
-			continue
-		}
-
-		var err error
-
-		// Чтобы не срать в логи ошибками, проставим shutdown state приложения в true.
-		shutdown = true
-
-		// Отпишемся от всех каналов и закроем коннект к редиске
-		if err = subscriber.Unsubscribe(ctx); err != nil {
-			log.Errorf("Unable to unsubscribe from redis channels cleanly: %s", err)
-		} else {
-			log.Debug("Unsubscribe from all redis channels")
-		}
-
-		if err = subscriber.Close(); err != nil {
-			log.Errorf("Unable to close redis connection cleanly: %s", err)
-		} else {
-			log.Debug("Close redis connection")
-		}
-
-		if isConnected && !shutdown {
-			log.Debug("Try to set our presence to Unavailable and status to Offline")
-
-			// Вот тут понадобится коллекция известных пользователей, чтобы им разослать presence, что бот свалил в offline
-			// Пока за неимением лучшего сообщим об этом самим себе.
-			for _, room := range roomsConnected {
-				if _, err := talk.SendPresence(
-					xmpp.Presence{ //nolint:exhaustruct
-						To:     room,
-						Status: "Offline",
-						Type:   "unavailable",
-					},
-				); err != nil {
-					log.Infof("Unable to send presence to jabber server: %s", err)
-				}
-			}
-
-			// И закрываем соединение.
-			log.Infoln("Closing connection to jabber server")
-
-			if err := talk.Close(); err != nil {
-				log.Infof("Unable to close connection to jabber server: %s", err)
-			}
-		}
-
-		if len(settingsDB) > 0 {
-			log.Debug("Closing runtime jabber room settings db")
-
-			for _, db := range settingsDB {
-				_ = db.Close()
-			}
-		}
-
-		os.Exit(0)
-	}
-
-	return nil
-}
-
-// establishConnection устанавливает соединение с jabber-сервером.
-func establishConnection() error {
+// EstablishConnection устанавливает соединение с jabber-сервером.
+func EstablishConnection() error {
 	var err error
 
-	if connecting && !isConnected {
+	if connecting && !IsConnected {
 		return nil
 	}
 
 	// Проставляем глобальные переменные.
 	connecting = true
-	isConnected = false
-	roomsConnected = make([]string, 0)
+	IsConnected = false
+	RoomsConnected = make([]string, 0)
 
-	talk, err = options.NewClient()
+	Talk, err = Options.NewClient()
 
 	if err != nil {
-		return fmt.Errorf("Unable to connect to %s: %w", options.Host, err)
+		return fmt.Errorf("unable to connect to %s: %w", Options.Host, err)
 	}
 
 	// По идее keepalive должен же проходить только, если мы уже на сервере, так?
-	if _, err := talk.SendKeepAlive(); err != nil {
-		return fmt.Errorf("Try to send initial KeepAlive, got error: %w", err)
+	if _, err := Talk.SendKeepAlive(); err != nil {
+		return fmt.Errorf("try to send initial KeepAlive, got error: %w", err)
 	}
 
 	log.Info("Connected")
 
 	// Джойнимся к чятикам, но делаем это в фоне, чтобы не блочиться на ошибках, например, если бота забанили
-	for _, room := range config.Jabber.Channels {
-		gTomb.Go(func() error { return joinMuc(room.Name) })
+	for _, room := range Config.Jabber.Channels {
+		GTomb.Go(func() error { return joinMuc(room.Name) })
 	}
 
-	gTomb.Go(func() error { return RotateStatus("") })
+	GTomb.Go(func() error { return RotateStatus("") })
 
-	lastActivity = time.Now().Unix()
+	LastActivity = time.Now().Unix()
 	connecting = false
-	isConnected = true
+	IsConnected = true
 
-	log.Debugf("Sending disco#info to %s", config.Jabber.Server)
+	log.Debugf("Sending disco#info to %s", Config.Jabber.Server)
 
-	_, err = talk.DiscoverInfo(talk.JID(), config.Jabber.Server)
+	_, err = Talk.DiscoverInfo(Talk.JID(), Config.Jabber.Server)
 
 	if err != nil {
-		return fmt.Errorf("Unable to send disco#info to jabber server: %s", err)
+		return fmt.Errorf("unable to send disco#info to jabber server: %w", err)
 	}
 
 	return nil
@@ -140,14 +65,14 @@ func establishConnection() error {
 
 // joinMu джойнится к конференциям/каналам/комнатам в джаббере.
 func joinMuc(room string) error {
-	log.Debugf("Sending disco#info from %s to %s", talk.JID(), room)
+	log.Debugf("Sending disco#info from %s to %s", Talk.JID(), room)
 
-	if _, err := talk.DiscoverInfo(talk.JID(), room); err != nil {
-		return fmt.Errorf("Unable to send disco#info to MUC %s: %s", room, err)
+	if _, err := Talk.DiscoverInfo(Talk.JID(), room); err != nil {
+		return fmt.Errorf("unable to send disco#info to MUC %s: %w", room, err)
 	}
 
 	// Ждём, пока muc нам вернёт список фичей.
-	for i := 0; i < (20 * int(config.Jabber.ConnectionTimeout)); i++ {
+	for i := 0; i < (20 * int(Config.Jabber.ConnectionTimeout)); i++ {
 		var (
 			myRoom    interface{}
 			supported bool
@@ -156,7 +81,7 @@ func joinMuc(room string) error {
 
 		time.Sleep(50 * time.Millisecond)
 
-		if myRoom, exist = mucCapsList.Get(room); !exist {
+		if myRoom, exist = MucCapsList.Get(room); !exist {
 			// Пока не задискаверилась
 			continue
 		}
@@ -173,8 +98,8 @@ func joinMuc(room string) error {
 	}
 
 	// Пытаемся зайти в комнату
-	if _, err := talk.JoinMUCNoHistory(room, getBotNickFromRoomConfig(room)); err != nil {
-		return fmt.Errorf("Unable to join to MUC: %s, %w", room, err)
+	if _, err := Talk.JoinMUCNoHistory(room, getBotNickFromRoomConfig(room)); err != nil {
+		return fmt.Errorf("unable to join to MUC: %s, %w", room, err)
 	}
 
 	log.Infof("Joining to MUC: %s", room)
@@ -182,10 +107,10 @@ func joinMuc(room string) error {
 	// Ждём, когда прилетит presence из комнаты, тогда мы точно знаем, что мы вошли.
 	entered := false
 
-	for i := 0; i < (20 * int(config.Jabber.ConnectionTimeout)); i++ {
+	for i := 0; i < (20 * int(Config.Jabber.ConnectionTimeout)); i++ {
 		time.Sleep(50 * time.Millisecond)
 
-		if slices.Contains(roomsConnected, room) {
+		if slices.Contains(RoomsConnected, room) {
 			entered = true
 
 			break
@@ -196,7 +121,7 @@ func joinMuc(room string) error {
 		log.Errorf(
 			"Unable to enter to MUC %s, join timeout after %d seconds (server does not return my presence for this room)",
 			room,
-			20*int(config.Jabber.ConnectionTimeout)+1,
+			20*int(Config.Jabber.ConnectionTimeout)+1,
 		)
 
 		return nil
@@ -205,54 +130,54 @@ func joinMuc(room string) error {
 	// Вот теперь точно можно слать статус.
 	log.Infof("Joined to MUC: %s", room)
 
-	gTomb.Go(func() error { return RotateStatus(room) })
+	GTomb.Go(func() error { return RotateStatus(room) })
 
 	return nil
 }
 
-// probeServerLiveness проверяет живость соединения с сервером. Для многих серверов обязательная штука, без которой
+// ProbeServerLiveness проверяет живость соединения с сервером. Для многих серверов обязательная штука, без которой
 // они выкидывают клиента через некоторое время неактивности.
-func probeServerLiveness() error { //nolint:gocognit
+func ProbeServerLiveness() error { //nolint:gocognit
 	for {
 		for {
-			if shutdown {
+			if Shutdown {
 				return nil
 			}
 
-			sleepTime := time.Duration(config.Jabber.ServerPingDelay) * 1000 * time.Millisecond
-			sleepTime += time.Duration(rand.Int63n(1000*config.Jabber.PingSplayDelay)) * time.Millisecond
+			sleepTime := time.Duration(Config.Jabber.ServerPingDelay) * 1000 * time.Millisecond
+			sleepTime += time.Duration(rand.Int63n(1000*Config.Jabber.PingSplayDelay)) * time.Millisecond
 			time.Sleep(sleepTime)
 
-			if !isConnected {
+			if !IsConnected {
 				continue
 			}
 
-			// Пингуем, только если не было никакой активности в течение > config.Jabber.ServerPingDelay,
-			// в худшем случе это будет ~ (config.Jabber.PingSplayDelay * 2) + config.Jabber.PingSplayDelay
-			// if (time.Now().Unix() - lastServerActivity) < (config.Jabber.ServerPingDelay + config.Jabber.PingSplayDelay) {
+			// Пингуем, только если не было никакой активности в течение > Config.Jabber.ServerPingDelay,
+			// в худшем случе это будет ~ (Config.Jabber.PingSplayDelay * 2) + Config.Jabber.PingSplayDelay
+			// if (time.Now().Unix() - lastServerActivity) < (Config.Jabber.ServerPingDelay + Config.Jabber.PingSplayDelay) {
 			//	continue
 			// }
 
-			if serverCapsQueried { // Сервер ответил на disco#info
+			if ServerCapsQueried { // Сервер ответил на disco#info
 				var (
 					value interface{}
 					exist bool
 				)
 
-				value, exist = serverCapsList.Get("urn:xmpp:ping")
+				value, exist = ServerCapsList.Get("urn:xmpp:ping")
 
 				switch {
 				// Сервер анонсировал, что умеет в c2s пинги
 				case exist && value.(bool):
 					// Таймаут c2s пинга. Возьмём сумму задержки между пингами, добавим таймаут коннекта и добавим
 					// максимальную корректировку разброса.
-					txTimeout := config.Jabber.ServerPingDelay + config.Jabber.ConnectionTimeout
-					txTimeout += config.Jabber.PingSplayDelay
+					txTimeout := Config.Jabber.ServerPingDelay + Config.Jabber.ConnectionTimeout
+					txTimeout += Config.Jabber.PingSplayDelay
 					rxTimeout := txTimeout
 
-					rxTimeAgo := time.Now().Unix() - serverPingTimestampRx
+					rxTimeAgo := time.Now().Unix() - ServerPingTimestampRx
 
-					if serverPingTimestampTx > 0 { // Первая пуля от нас ушла...
+					if ServerPingTimestampTx > 0 { // Первая пуля от нас ушла...
 						switch {
 						// Давненько мы не получали понгов от сервера, вероятно, соединение с сервером утеряно?
 						case rxTimeAgo > (rxTimeout * 2):
@@ -265,36 +190,36 @@ func probeServerLiveness() error { //nolint:gocognit
 
 						// По-умолчанию, мы отправляем c2s пинг
 						default:
-							log.Debugf("Sending c2s ping from %s to %s", talk.JID(), config.Jabber.Server)
+							log.Debugf("Sending c2s ping from %s to %s", Talk.JID(), Config.Jabber.Server)
 
-							if err := talk.PingC2S(talk.JID(), config.Jabber.Server); err != nil {
+							if err := Talk.PingC2S(Talk.JID(), Config.Jabber.Server); err != nil {
 								return err
 							}
 
-							serverPingTimestampTx = time.Now().Unix()
+							ServerPingTimestampTx = time.Now().Unix()
 						}
 					} else { // Первая пуля пока не вылетела, отправляем
-						log.Debugf("Sending first c2s ping from %s to %s", talk.JID(), config.Jabber.Server)
+						log.Debugf("Sending first c2s ping from %s to %s", Talk.JID(), Config.Jabber.Server)
 
-						if err := talk.PingC2S(talk.JID(), config.Jabber.Server); err != nil {
+						if err := Talk.PingC2S(Talk.JID(), Config.Jabber.Server); err != nil {
 							return err
 						}
 
-						serverPingTimestampTx = time.Now().Unix()
+						ServerPingTimestampTx = time.Now().Unix()
 					}
 
 				// Сервер не анонсировал, что умеет в c2s пинги
 				default:
 					log.Debug("Sending keepalive whitespace ping")
 
-					if _, err := talk.SendKeepAlive(); err != nil {
+					if _, err := Talk.SendKeepAlive(); err != nil {
 						return err
 					}
 				}
 			} else { // Сервер не ответил на disco#info
 				log.Debug("Sending keepalive whitespace ping")
 
-				if _, err := talk.SendKeepAlive(); err != nil {
+				if _, err := Talk.SendKeepAlive(); err != nil {
 					return err
 				}
 			}
@@ -302,31 +227,31 @@ func probeServerLiveness() error { //nolint:gocognit
 	}
 }
 
-// probeMUCLiveness Пингует MUC-и, нужно для проверки, что клиент ещё находится в MUC-е.
-func probeMUCLiveness() error { //nolint:gocognit
+// ProbeMUCLiveness Пингует MUC-и, нужно для проверки, что клиент ещё находится в MUC-е.
+func ProbeMUCLiveness() { //nolint:gocognit
 	for {
 		for {
-			for _, room := range roomsConnected {
+			for _, room := range RoomsConnected {
 				var (
 					exist          bool
 					lastActivityTS interface{}
 				)
 
 				// Если записи про комнату нету, то пинговать её бессмысленно.
-				if lastActivityTS, exist = lastMucActivity.Get(room); !exist {
+				if lastActivityTS, exist = LastMucActivity.Get(room); !exist {
 					continue
 				}
 
 				// Если время последней активности в чятике не превысило
-				// config.Jabber.ServerPingDelay + config.Jabber.PingSplayDelay, ничего не пингуем.
-				if (time.Now().Unix() - lastActivityTS.(int64)) < (config.Jabber.ServerPingDelay + config.Jabber.PingSplayDelay) {
+				// Config.Jabber.ServerPingDelay + Config.Jabber.PingSplayDelay, ничего не пингуем.
+				if (time.Now().Unix() - lastActivityTS.(int64)) < (Config.Jabber.ServerPingDelay + Config.Jabber.PingSplayDelay) {
 					continue
 				}
 
 				/* Пинг MUC-а по сценарию без серверной оптимизации мы реализовывать не будем. Это как-то не надёжно.
 				go func(room string) {
 					// Небольшая рандомная задержка перед пингом комнаты
-					sleepTime := time.Duration(rand.Int63n(1000*config.Jabber.PingSplayDelay)) * time.Millisecond //nolint:gosec
+					sleepTime := time.Duration(rand.Int63n(1000*Config.Jabber.PingSplayDelay)) * time.Millisecond //nolint:gosec
 					time.Sleep(sleepTime)
 
 					if err := talk.PingS2S(talk.JID(), room+"/"+getBotNickFromRoomConfig(room)); err != nil {
@@ -338,21 +263,21 @@ func probeMUCLiveness() error { //nolint:gocognit
 
 				var roomMap interface{}
 
-				roomMap, exist = mucCapsList.Get(room)
+				roomMap, exist = MucCapsList.Get(room)
 
 				// Пинги комнаты проводим, только если она записана, как прошедшая disco#info и поддерживающая
 				// Server Optimization.
 				if exist && roomMap.(map[string]bool)["http://jabber.org/protocol/muc#self-ping-optimization"] {
-					gTomb.Go(
+					GTomb.Go(
 						func() error {
 							// Небольшая рандомная задержка перед пингом комнаты.
-							sleepTime := time.Duration(rand.Int63n(1000*config.Jabber.PingSplayDelay)) * time.Millisecond
+							sleepTime := time.Duration(rand.Int63n(1000*Config.Jabber.PingSplayDelay)) * time.Millisecond
 							time.Sleep(sleepTime)
 
-							log.Debugf("Sending MUC ping from %s to %s", talk.JID(), room)
+							log.Debugf("Sending MUC ping from %s to %s", Talk.JID(), room)
 
-							if err := talk.PingS2S(talk.JID(), room); err != nil {
-								return fmt.Errorf("unable to ping MUC %s: %w", room, err)
+							if err := Talk.PingS2S(Talk.JID(), room); err != nil {
+								log.Errorf("unable to ping MUC %s: %s", room, err)
 							}
 
 							return nil
@@ -361,7 +286,7 @@ func probeMUCLiveness() error { //nolint:gocognit
 				}
 			}
 
-			time.Sleep(time.Duration(config.Jabber.MucPingDelay) * time.Second)
+			time.Sleep(time.Duration(Config.Jabber.MucPingDelay) * time.Second)
 		}
 	}
 }
@@ -370,11 +295,11 @@ func probeMUCLiveness() error { //nolint:gocognit
 func RotateStatus(room string) error {
 	for {
 		// TODO: Переделать на ticker-ы
-		totalSleepTime := time.Duration(config.Jabber.RuntimeStatus.RotationTime) * time.Second
-		totalSleepTime += time.Duration(config.Jabber.RuntimeStatus.RotationSplayTime) * time.Second
+		totalSleepTime := time.Duration(Config.Jabber.RuntimeStatus.RotationTime) * time.Second
+		totalSleepTime += time.Duration(Config.Jabber.RuntimeStatus.RotationSplayTime) * time.Second
 
 		for {
-			status := randomPhrase(config.Jabber.RuntimeStatus.Text)
+			status := RandomPhrase(Config.Jabber.RuntimeStatus.Text)
 			log.Debugf("Set status for MUC: %s to: %s", room, status)
 
 			var p xmpp.Presence
@@ -390,12 +315,12 @@ func RotateStatus(room string) error {
 				}
 			}
 
-			if _, err := talk.SendPresence(p); err != nil {
-				return fmt.Errorf("Unable to send presence to MUC %s: %s", room, err)
+			if _, err := Talk.SendPresence(p); err != nil {
+				return fmt.Errorf("unable to send presence to MUC %s: %w", room, err)
 			}
 
 			// Если мы не хотим ротировать, то цикл нам тут не нужен, просто выходим.
-			if config.Jabber.RuntimeStatus.RotationTime == 0 {
+			if Config.Jabber.RuntimeStatus.RotationTime == 0 {
 				return nil
 			}
 
@@ -404,8 +329,8 @@ func RotateStatus(room string) error {
 	}
 }
 
-// randomPhrase Выдаёт одну рандомную фразу из даденного списка фраз.
-func randomPhrase(list []string) string {
+// RandomPhrase Выдаёт одну рандомную фразу из даденного списка фраз.
+func RandomPhrase(list []string) string {
 	phrase := ""
 
 	if listLen := len(list); listLen > 0 {
@@ -441,7 +366,7 @@ func getRealJIDfromNick(fullNick string) string {
 	room := (strings.SplitN(fullNick, "/", 2))[0]
 
 	// Достанем presence участника
-	presenceJSONInterface, present := roomPresences.Get(room)
+	presenceJSONInterface, present := RoomPresences.Get(room)
 
 	// Никого нет дома
 	if !present {
@@ -467,8 +392,8 @@ func isMucAdmin(fullNick string) bool {
 
 	room := (strings.SplitN(fullNick, "/", 2))[0]
 
-	// Достанем presence участника
-	presenceJSONInterface, present := roomPresences.Get(room)
+	// Достанем presence участника.
+	presenceJSONInterface, present := RoomPresences.Get(room)
 
 	// Никого нет дома
 	if !present {
@@ -498,7 +423,7 @@ func getMucNames(room string) []string {
 	)
 
 	// Достанем presence участников
-	presenceJSONInterface, present := roomPresences.Get(room)
+	presenceJSONInterface, present := RoomPresences.Get(room)
 
 	if !present {
 		return names
@@ -516,15 +441,15 @@ func getMucNames(room string) []string {
 	return names
 }
 
-// getBotNickFromRoomConfig достаёт (короткий) ник бота из настроек чата
+// getBotNickFromRoomConfig достаёт (короткий) ник бота из настроек чата.
 func getBotNickFromRoomConfig(room string) string {
-	for _, roomStruct := range config.Jabber.Channels {
+	for _, roomStruct := range Config.Jabber.Channels {
 		if roomStruct.Name == room {
 			return roomStruct.Nick
 		}
 	}
 
-	return config.Jabber.Nick
+	return Config.Jabber.Nick
 }
 
 /* vim: set ft=go noet ai ts=4 sw=4 sts=4: */

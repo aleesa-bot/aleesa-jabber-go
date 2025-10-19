@@ -1,4 +1,4 @@
-package main
+package anycollection
 
 import (
 	"sync"
@@ -12,12 +12,13 @@ type Collection struct {
 
 // Item представляет собой интерфейс для хранения произвольных данных.
 type item struct {
-	data interface{}
+	data any
 }
 
 // NewCollection создаёт инстанс коллекции.
 func NewCollection() *Collection {
-	c := &Collection{ //nolint:exhaustruct
+	c := &Collection{
+		items: sync.Map{},
 		close: make(chan struct{}),
 	}
 
@@ -25,7 +26,7 @@ func NewCollection() *Collection {
 }
 
 // Get достаёт данные по заданному ключу из коллекции.
-func (collection *Collection) Get(key interface{}) (interface{}, bool) {
+func (collection *Collection) Get(key any) (any, bool) {
 	obj, exists := collection.items.Load(key)
 
 	if !exists {
@@ -38,15 +39,15 @@ func (collection *Collection) Get(key interface{}) (interface{}, bool) {
 }
 
 // Set сохраняет данные с заданным ключом в коллекцию.
-func (collection *Collection) Set(key interface{}, value interface{}) {
+func (collection *Collection) Set(key any, value any) {
 	collection.items.Store(key, item{
 		data: value,
 	})
 }
 
 // Range применяет функцию f ко всем ключам в коллекции.
-func (collection *Collection) Range(f func(key, value interface{}) bool) {
-	fn := func(key, value interface{}) bool {
+func (collection *Collection) Range(f func(key, value any) bool) {
+	fn := func(key, value any) bool {
 		item := value.(item)
 
 		return f(key, item.data)
@@ -56,7 +57,7 @@ func (collection *Collection) Range(f func(key, value interface{}) bool) {
 }
 
 // Delete удаляет ключ и значение из коллекции данных.
-func (collection *Collection) Delete(key interface{}) {
+func (collection *Collection) Delete(key any) {
 	collection.items.Delete(key)
 }
 

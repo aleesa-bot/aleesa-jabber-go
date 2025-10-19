@@ -1,4 +1,4 @@
-package main
+package jabber
 
 import (
 	"encoding/json"
@@ -7,8 +7,9 @@ import (
 	"slices"
 	"strings"
 
+	"aleesa-jabber-go/internal/log"
+
 	"github.com/eleksir/go-xmpp"
-	log "github.com/sirupsen/logrus"
 )
 
 func cmd(v xmpp.Chat) error {
@@ -18,10 +19,10 @@ func cmd(v xmpp.Chat) error {
 		data    []byte
 	)
 
-	message.From = config.Redis.MyChannel
+	message.From = Config.Redis.MyChannel
 	message.Threadid = "" // Тредиков в jabber-е нету, поэтому это поле отправляем пустым
 	message.Message = v.Text
-	message.Plugin = config.Redis.MyChannel
+	message.Plugin = Config.Redis.MyChannel
 
 	// Список команд, публично доступных, без каких-то специальных настроек
 	cmds := []string{"ping", "пинг", "пинх", "pong", "понг", "понх", "coin", "монетка", "roll", "dice", "кости",
@@ -58,7 +59,7 @@ func cmd(v xmpp.Chat) error {
 
 		message.Misc.Answer = 0
 		message.Misc.Fwdcnt = 0
-		message.Misc.Csign = config.CSign
+		message.Misc.Csign = Config.CSign
 		message.Misc.Username = userNick
 		message.Misc.Botnick = getBotNickFromRoomConfig(message.Chatid)
 		message.Misc.Msgformat = 0
@@ -66,9 +67,9 @@ func cmd(v xmpp.Chat) error {
 		msgLen := len(v.Text)
 
 		// TODO: а вот тут надо впилить парсер команд
-		if (msgLen > len(config.CSign)) && (v.Text[:len(config.CSign)] == config.CSign) {
+		if (msgLen > len(Config.CSign)) && (v.Text[:len(Config.CSign)] == Config.CSign) {
 			var (
-				cmd    = v.Text[len(config.CSign):]
+				cmd    = v.Text[len(Config.CSign):]
 				room   = message.Chatid
 				answer string
 			)
@@ -76,55 +77,55 @@ func cmd(v xmpp.Chat) error {
 			// И таких кейсов у нас минимум на команды !help и семейство команд !admin, а также на те команды, которые не всегда работают
 			switch {
 			case cmd == "help" || cmd == "помощь":
-				answer += fmt.Sprintf("%shelp | %sпомощь             - это сообщение\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%sanek | %sанек | %sанекдот    - рандомный анекдот с anekdot.ru\n", config.CSign, config.CSign, config.CSign)
-				answer += fmt.Sprintf("%sbuni                       - комикс-стрип hapi buni\n", config.CSign)
-				answer += fmt.Sprintf("%sbunny                      - кролик\n", config.CSign)
-				answer += fmt.Sprintf("%srabbit | %sкролик           - кролик\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%scat | %sкис                 - кошечка\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%sdice | %sroll | %sкости      - бросить кости\n", config.CSign, config.CSign, config.CSign)
-				answer += fmt.Sprintf("%sdig | %sкопать              - заняться археологией\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%sdrink | %sпраздник          - какой сегодня праздник?\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%sfish | %sfisher             - порыбачить\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%sрыба | %sрыбка | %sрыбалка   - порыбачить\n", config.CSign, config.CSign, config.CSign)
-				answer += fmt.Sprintf("%sf | %sф                     - рандомная фраза из сборника цитат fortune_mod\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%sfortune | %sфортунка        - рандомная фраза из сборника цитат fortune_mod\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%sfox | %sлис                 - лисичка\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%sfriday | %sпятница          - а не пятница ли сегодня?\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%sfrog | %sлягушка            - лягушка\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%shorse | %sлошадь | %sлошадка - лошадка\n", config.CSign, config.CSign, config.CSign)
-				answer += fmt.Sprintf("%skarma фраза                - посмотреть карму фразы\n", config.CSign)
-				answer += fmt.Sprintf("%sкарма фраза                - посмотреть карму фразы\n", config.CSign)
+				answer += fmt.Sprintf("%shelp | %sпомощь             - это сообщение\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%sanek | %sанек | %sанекдот    - рандомный анекдот с anekdot.ru\n", Config.CSign, Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%sbuni                       - комикс-стрип hapi buni\n", Config.CSign)
+				answer += fmt.Sprintf("%sbunny                      - кролик\n", Config.CSign)
+				answer += fmt.Sprintf("%srabbit | %sкролик           - кролик\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%scat | %sкис                 - кошечка\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%sdice | %sroll | %sкости      - бросить кости\n", Config.CSign, Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%sdig | %sкопать              - заняться археологией\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%sdrink | %sпраздник          - какой сегодня праздник?\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%sfish | %sfisher             - порыбачить\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%sрыба | %sрыбка | %sрыбалка   - порыбачить\n", Config.CSign, Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%sf | %sф                     - рандомная фраза из сборника цитат fortune_mod\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%sfortune | %sфортунка        - рандомная фраза из сборника цитат fortune_mod\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%sfox | %sлис                 - лисичка\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%sfriday | %sпятница          - а не пятница ли сегодня?\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%sfrog | %sлягушка            - лягушка\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%shorse | %sлошадь | %sлошадка - лошадка\n", Config.CSign, Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%skarma фраза                - посмотреть карму фразы\n", Config.CSign)
+				answer += fmt.Sprintf("%sкарма фраза                - посмотреть карму фразы\n", Config.CSign)
 				answer += fmt.Sprintln("фраза++ | фраза--           - повысить или понизить карму фразы")
-				answer += fmt.Sprintf("%slat | %sлат                 - сгенерировать фразу из крылатого латинского выражения\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%smonkeyuser                 - комикс-стрип MonkeyUser\n", config.CSign)
-				answer += fmt.Sprintf("%sowl | %sсова                - сова\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%sping | %sпинг               - попинговать бота\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%sproverb | %sпословица       - рандомная русская пословица\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%ssnail | %sулитка            - улитка\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%ssome_brew                  - выдать соответствующий напиток, бармен может налить rum, ром, vodka, водку, tequila, текила\n", config.CSign)
-				answer += fmt.Sprintf("%sver | %sversion             - написать что-то про версию ПО\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%sверсия                     - написать что-то про версию ПО\n", config.CSign)
-				answer += fmt.Sprintf("%sw <город> | %sп <город>     - погода в городе\n", config.CSign, config.CSign)
-				answer += fmt.Sprintf("%sxkcd                       - комикс-стрип с xkcb.ru\n", config.CSign)
+				answer += fmt.Sprintf("%slat | %sлат                 - сгенерировать фразу из крылатого латинского выражения\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%smonkeyuser                 - комикс-стрип MonkeyUser\n", Config.CSign)
+				answer += fmt.Sprintf("%sowl | %sсова                - сова\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%sping | %sпинг               - попинговать бота\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%sproverb | %sпословица       - рандомная русская пословица\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%ssnail | %sулитка            - улитка\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%ssome_brew                  - выдать соответствующий напиток, бармен может налить rum, ром, vodka, водку, tequila, текила\n", Config.CSign)
+				answer += fmt.Sprintf("%sver | %sversion             - написать что-то про версию ПО\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%sверсия                     - написать что-то про версию ПО\n", Config.CSign)
+				answer += fmt.Sprintf("%sw <город> | %sп <город>     - погода в городе\n", Config.CSign, Config.CSign)
+				answer += fmt.Sprintf("%sxkcd                       - комикс-стрип с xkcb.ru\n", Config.CSign)
 
 				// Для овнера или админа надо показывать команду admin
 				if isMucAdmin(v.Remote) {
-					answer += fmt.Sprintf("%sadmin                      - настройки некоторых плагинов бота для комнаты\n", config.CSign)
+					answer += fmt.Sprintf("%sadmin                      - настройки некоторых плагинов бота для комнаты\n", Config.CSign)
 				}
 
-				_, err = talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
+				_, err = Talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
 
 				return err
 
 			case cmd == "admin":
 				if isMucAdmin(v.Remote) {
-					answer += fmt.Sprintf("%sadmin oboobs #       - где 1 - вкл, 0 - выкл плагина oboobs\n", config.CSign)
-					answer += fmt.Sprintf("%sadmin oboobs         - показываем ли сисечки по просьбе участников чата (команды %stits, %stities, %sboobs, %sboobies, %sсиси, %sсисечки)\n", config.CSign, config.CSign, config.CSign, config.CSign, config.CSign, config.CSign, config.CSign)
-					answer += fmt.Sprintf("%sadmin obutts #       - где 1 - вкл, 0 - выкл плагина obutts\n", config.CSign)
-					answer += fmt.Sprintf("%sadmin obutts         - показываем ли попки по просьбе участников чата (команды %sass, %sbutt, %sbooty, %sпопа, %sпопка)\n", config.CSign, config.CSign, config.CSign, config.CSign, config.CSign, config.CSign)
+					answer += fmt.Sprintf("%sadmin oboobs #       - где 1 - вкл, 0 - выкл плагина oboobs\n", Config.CSign)
+					answer += fmt.Sprintf("%sadmin oboobs         - показываем ли сисечки по просьбе участников чата (команды %stits, %stities, %sboobs, %sboobies, %sсиси, %sсисечки)\n", Config.CSign, Config.CSign, Config.CSign, Config.CSign, Config.CSign, Config.CSign, Config.CSign)
+					answer += fmt.Sprintf("%sadmin obutts #       - где 1 - вкл, 0 - выкл плагина obutts\n", Config.CSign)
+					answer += fmt.Sprintf("%sadmin obutts         - показываем ли попки по просьбе участников чата (команды %sass, %sbutt, %sbooty, %sпопа, %sпопка)\n", Config.CSign, Config.CSign, Config.CSign, Config.CSign, Config.CSign, Config.CSign)
 
-					_, err = talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
+					_, err = Talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
 
 					return err
 				}
@@ -145,7 +146,7 @@ func cmd(v xmpp.Chat) error {
 						answer = "Плагин oboobs выключен"
 					}
 
-					_, err = talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
+					_, err = Talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
 
 					return err
 				}
@@ -160,7 +161,7 @@ func cmd(v xmpp.Chat) error {
 						answer = "Плагин oboobs включен"
 					}
 
-					_, err = talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
+					_, err = Talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
 
 					return err
 				}
@@ -170,7 +171,7 @@ func cmd(v xmpp.Chat) error {
 					_ = saveSetting(room, "oboobs", "0")
 					answer = "Плагин oboobs выключен"
 
-					_, err = talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
+					_, err = Talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
 
 					return err
 				}
@@ -189,7 +190,7 @@ func cmd(v xmpp.Chat) error {
 						answer = "Плагин obutts выключен"
 					}
 
-					_, err = talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
+					_, err = Talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
 
 					return err
 				}
@@ -204,7 +205,7 @@ func cmd(v xmpp.Chat) error {
 						answer = "Плагин obutts включен"
 					}
 
-					_, err = talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
+					_, err = Talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
 
 					return err
 				}
@@ -214,7 +215,7 @@ func cmd(v xmpp.Chat) error {
 					_ = saveSetting(room, "obutts", "0")
 					answer = "Плагин obutts выключен"
 
-					_, err = talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
+					_, err = Talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
 
 					return err
 				}
@@ -289,7 +290,7 @@ func cmd(v xmpp.Chat) error {
 								} else {
 									answer := fmt.Sprintf("Я тут не вижу участника с ником %s", userNick)
 
-									_, err = talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
+									_, err = Talk.Send(xmpp.Chat{Remote: room, Type: v.Type, Text: answer}) //nolint:exhaustruct
 
 									return err
 								}
@@ -351,9 +352,9 @@ func cmd(v xmpp.Chat) error {
 
 		message.Misc.Answer = 1
 		message.Misc.Fwdcnt = 0
-		message.Misc.Csign = config.CSign
+		message.Misc.Csign = Config.CSign
 		message.Misc.Username = message.Userid
-		message.Misc.Botnick = config.Jabber.Nick
+		message.Misc.Botnick = Config.Jabber.Nick
 		message.Misc.Msgformat = 0
 
 		data, err = json.Marshal(message)
@@ -364,11 +365,11 @@ func cmd(v xmpp.Chat) error {
 	}
 
 	// Заталкиваем наш json в редиску
-	if err := redisClient.Publish(ctx, config.Redis.Channel, data).Err(); err != nil {
-		return fmt.Errorf("unable to send data to redis channel %s: %w", config.Redis.Channel, err)
+	if err := RedisClient.Publish(Ctx, Config.Redis.Channel, data).Err(); err != nil {
+		return fmt.Errorf("unable to send data to redis channel %s: %w", Config.Redis.Channel, err)
 	}
 
-	log.Debugf("Sent msg to redis channel %s: %s", config.Redis.Channel, string(data))
+	log.Debugf("Sent msg to redis channel %s: %s", Config.Redis.Channel, string(data))
 
 	return err
 }

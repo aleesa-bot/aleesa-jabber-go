@@ -1,4 +1,4 @@
-package main
+package jabber
 
 import (
 	"encoding/json"
@@ -6,19 +6,20 @@ import (
 	"fmt"
 	"os"
 
+	"aleesa-jabber-go/internal/log"
+
 	"github.com/hjson/hjson-go"
-	log "github.com/sirupsen/logrus"
 )
 
-// readConfig читает и валидирует конфиг, а также выставляет некоторые default-ы, если значений для параметров в конфиге
+// ReadConfig читает и валидирует конфиг, а также выставляет некоторые default-ы, если значений для параметров в конфиге
 // нет.
-func readConfig() error { //nolint:gocognit,gocyclo
+func ReadConfig() error { //nolint:gocognit,gocyclo
 	var (
 		err          error
 		configLoaded = false
 	)
 
-	for _, location := range configLocations {
+	for _, location := range ConfigLocations {
 		fileInfo, err := os.Stat(location)
 
 		// Предполагаем, что файла либо нет, либо мы не можем его прочитать, второе надо бы логгировать, но пока забьём.
@@ -189,7 +190,7 @@ func readConfig() error { //nolint:gocognit,gocyclo
 
 		for n, channel := range sampleConfig.Jabber.Channels {
 			if channel.Name == "" {
-				return fmt.Errorf("no \"name\" entry in jabber channel config")
+				return fmt.Errorf("no \"name\" entry in jabber channel config") //nolint: err113
 			}
 
 			if channel.Nick == "" {
@@ -232,7 +233,7 @@ func readConfig() error { //nolint:gocognit,gocyclo
 
 		// sampleConfig.Log = "" if not set
 
-		config = sampleConfig
+		Config = sampleConfig
 		configLoaded = true
 
 		log.Infof("Using %s as config file", location)
